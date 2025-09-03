@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VIN Customer Profiles (iPad Camera Ready)</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --line:#e5e7eb; --text:#111827; --muted:#6b7280; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  label { font-size: 12px; color: var(--muted); display:block; margin-top:10px; }
+  input, button { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); font-size:16px; }
+  button { background:#111827; color:#fff; border:none; cursor:pointer; }
+  button.secondary { background:#fff; color:#111827; border:1px solid var(--line); }
+  .grid { display:grid; grid-template-columns: 1fr; gap:12px; }
+  @media (min-width: 720px) { .grid.two { grid-template-columns: 1fr 1fr; } }
+  table { width:100%; border-collapse: collapse; margin-top: 14px; }
+  th, td { border-top: 1px solid var(--line); padding: 10px; text-align:left; font-size: 14px; }
+  th { background:#fafafa; }
+  .actions { display:flex; gap:8px; }
+  #preview { width: 100%; max-height: 260px; object-fit: contain; border:1px dashed var(--line); border-radius:12px; display:none; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <h1>VIN Customer Profiles (Camera & Manual)</h1>
+    <div class="grid two">
+      <div>
+        <label>Customer Name</label>
+        <input id="customerName" placeholder="Full Name" />
+      </div>
+      <div>
+        <label>Phone Number</label>
+        <input id="phone" placeholder="Phone Number" />
+      </div>
+      <div>
+        <label>Email</label>
+        <input id="email" placeholder="Email" />
+      </div>
+      <div>
+        <label>Plate Number</label>
+        <input id="plate" placeholder="Plate Number" />
+      </div>
+      <div>
+        <label>VIN</label>
+        <input id="vin" placeholder="Enter or scan VIN" maxlength="25" />
+      </div>
+    </div>
+    <button id="scanBtn">📷 Scan VIN (iPad Camera)</button>
+    <button class="secondary" id="decodeBtn">Decode VIN & Save</button>
+
+    <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
+    <img id="preview" alt="VIN/Barcode Preview" />
+
+    <h2 style="margin-top:20px;">Search</h2>
+    <input id="searchInput" placeholder="Search by Name, VIN, or Plate" />
+
+    <h2 style="margin-top:16px;">Saved Profiles</h2>
+    <table id="profilesTable">
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Phone</th>
+          <th>Email</th>
+          <th>Plate</th>
+          <th>VIN</th>
+          <th>Vehicle</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="https://unpkg.com/@zxing/library@0.20.0"></script>
+<script>
+let profiles = JSON.parse(localStorage.getItem('profiles') || '[]');
+let editingIndex = null;
+const $ = id => document.getElementById(id);
+const tableBody = document.querySelector('#profilesTable tbody');
+
+function saveProfiles(){ localStorage.setItem('profiles', JSON.stringify(profiles)); }
+function renderTable(list=profiles){
+  tableBody.innerHTML = '';
+  list.forEach((p,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = \`<td>\${p.name}</td><td>\${p.phone}</td><td>\${p.email}</td><td>\${p.plate}</td><td>\${p.vin}</td><td>\${p.vehicleInfo}</td><td class="actions"><button onclick="editProfile(\${i})">Edit</button><button onclick="deleteProfile(\${i})">Delete</button></td>\`;
+    tableBody.appendChild(tr);
+  });
+}
+renderTable();
+
+function editProfile(i){ let p=profiles[i]; $('customerName').value=p.name; $('phone').value=p.phone; $('email').value=p.email; $('plate').value=p.plate; $('vin').value=p.vin; editingIndex=i; }
+function deleteProfile(i){ if(confirm('Delete?')){ profiles.splice(i,1); saveProfiles(); renderTable(); } }
+
+$('searchInput').addEventListener('input',()=>{
+  const q=$('searchInput').value.toLowerCase();
+  renderTable(profiles.filter(p=>(p.name||'').toLowerCase().includes(q)||(p.vin||'').toLowerCase().includes(q)||(p.plate||'').toLowerCase().includes(q)));
+});
+
+async function decodeAndSaveVin(vin){
+  if(!vin){ alert('No VIN'); return; }
+  let vehicleInfo='';
+  try{
+    let res=await fetch(\`https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/\${vin}?format=json\`);
+    let data=await res.json(); let r=data.Results[0];
+    vehicleInfo=\`\${r.ModelYear} \${r.Make} \${r.Model}\`;
+  }catch(e){ vehicleInfo='Decode failed'; }
+  let profile={ name:$('customerName').value, phone:$('phone').value, email:$('email').value, plate:$('plate').value, vin, vehicleInfo };
+  if(editingIndex!==null){ profiles[editingIndex]=profile; editingIndex=null; } else profiles.push(profile);
+  saveProfiles(); renderTable();
+  $('customerName').value=$('phone').value=$('email').value=$('vin').value='';
+}
+
+$('decodeBtn').onclick=()=>{ let vin=$('vin').value.trim().toUpperCase(); decodeAndSaveVin(vin); };
+
+$('scanBtn').onclick=()=>{ $('cameraInput').click(); };
+$('cameraInput').addEventListener('change',async ev=>{
+  let file=ev.target.files[0]; if(!file) return;
+  let url=URL.createObjectURL(file); let img=$('preview'); img.src=url; img.style.display='block';
+  await new Promise(res=>img.onload=res);
+  try{
+    let reader=new ZXing.BrowserMultiFormatReader();
+    let result=await reader.decodeFromImage(img);
+    let vin=result.text.replace(/[^0-9A-Z]/gi,'').toUpperCase().slice(0,17);
+    $('vin').value=vin; decodeAndSaveVin(vin);
+  }catch(e){ alert('Could not read VIN barcode. Try again.'); }
+  $('cameraInput').value='';
+});
+</script>
+</body>
+</html>
